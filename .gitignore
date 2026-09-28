@@ -1,0 +1,6 @@
+node_modules/
+*.elc
+.ert/
+*.note
+fixtures.local.json
+.DS_Store

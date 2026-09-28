@@ -1,0 +1,21 @@
+{
+  "name": "supernote-emacs-renderer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thin CLI adapter around supernote-typescript for the Emacs supernote-view mode.",
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "bin": {
+    "supernote-render": "bin/supernote-render.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "image-js": "1.7.0",
+    "supernote-typescript": "0.7.1"
+  }
+}
