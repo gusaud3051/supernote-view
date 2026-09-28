@@ -106,8 +106,9 @@
   "Directory containing this installed package, including its renderer.")
 
 (defcustom supernote-view-helper
-  (expand-file-name "renderer/bin/supernote-render.mjs"
-                    supernote-view--package-directory)
+  (file-truename
+   (expand-file-name "renderer/bin/supernote-render.mjs"
+                     supernote-view--package-directory))
   "Path to the bundled Node helper script.
 Install its pinned dependencies with `supernote-view-install-helper', or run
 `supernote-view-repair-command' in a terminal.  No installation runs on load."
@@ -119,7 +120,7 @@ Install its pinned dependencies with `supernote-view-install-helper', or run
   (interactive)
   (let ((npm (executable-find "npm"))
         (directory (file-name-directory
-                    (directory-file-name (file-name-directory supernote-view-helper)))))
+                    (directory-file-name (file-name-directory (file-truename supernote-view-helper))))))
     (unless npm (user-error "npm is required; install Node.js first"))
     (unless (file-readable-p (expand-file-name "package-lock.json" directory))
       (user-error "Bundled renderer is missing; include renderer/ in the package recipe"))
@@ -407,7 +408,7 @@ the answer is dropped rather than drawn onto the wrong title.")
           (shell-quote-argument
            (directory-file-name
             (file-name-directory (directory-file-name
-                                  (file-name-directory supernote-view-helper)))))))
+                                  (file-name-directory (file-truename supernote-view-helper))))))))
 
 (defun supernote-view--field (object key)
   "Value of KEY in OBJECT, which is an alist or nil."

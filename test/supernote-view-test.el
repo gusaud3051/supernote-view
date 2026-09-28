@@ -28,6 +28,31 @@
 (require 'supernote-view)
 
 
+(ert-deftest supernote-view-test-helper-install-follows-build-symlinks ()
+  "Install dependencies beside the real Node source, as Node resolves imports."
+  (let* ((root (make-temp-file "supernote-build-" t))
+         (source (expand-file-name "source/bin/" root))
+         (build (expand-file-name "build/bin/" root))
+         (supernote-view-helper (expand-file-name "supernote-render.mjs" build))
+         command)
+    (unwind-protect
+        (progn
+          (make-directory source t) (make-directory build t)
+          (with-temp-file (expand-file-name "supernote-render.mjs" source) (insert "// test"))
+          (with-temp-file (expand-file-name "../package-lock.json" source) (insert "{}"))
+          (make-symbolic-link (expand-file-name "supernote-render.mjs" source) supernote-view-helper)
+          (should (string-match-p (regexp-quote (expand-file-name "source" root))
+                                  (supernote-view-repair-command)))
+          (cl-letf (((symbol-function 'executable-find) (lambda (_) "/usr/bin/npm"))
+                    ((symbol-function 'make-process)
+                     (lambda (&rest args) (setq command (plist-get args :command))))
+                    ((symbol-function 'display-buffer) #'ignore))
+            (supernote-view-install-helper))
+          (should (equal (file-truename (expand-file-name "source/" root))
+                         (file-truename (car (last command))))))
+      (when (get-buffer "*supernote-view-install*") (kill-buffer "*supernote-view-install*"))
+      (delete-directory root t))))
+
 ;;;; Fixtures and the stubbed helper
 
 (defvar supernote-test--queue nil
