@@ -92,6 +92,8 @@
 (declare-function evil-set-initial-state "evil-core")
 (declare-function evil-normalize-keymaps "evil-core")
 (declare-function evil-collection-inhibit-insert-state "evil-collection")
+(declare-function org-link-set-parameters "ol" (type &rest parameters))
+(declare-function org-link-store-props "ol" (&rest plist))
 
 
 ;;;; Customization
@@ -2214,6 +2216,52 @@ handwritten title.
   (buffer-disable-undo)
   (add-hook 'write-contents-functions #'supernote-view--refuse-save nil t)
   (supernote-view--normalize-evil))
+
+
+;;;; Org links
+
+;;;###autoload
+(defun supernote-view-org-store-link (&optional _interactive?)
+  "Store an Org link to the displayed page or the outline entry at point."
+  (when (derived-mode-p 'supernote-view-mode 'supernote-outline-mode)
+    (let* ((outline (derived-mode-p 'supernote-outline-mode))
+           (entry (and outline (supernote-outline--entry-at-point)))
+           (note (if outline (supernote-outline--note-buffer) (current-buffer)))
+           (page (if outline
+                     (progn
+                       (unless entry (user-error "No Supernote outline entry at point"))
+                       (1+ (or (supernote-view--field entry 'page_index) 0)))
+                   (1+ supernote-view--page)))
+           (source (buffer-local-value 'supernote-view--source note)))
+      (unless source (user-error "This Supernote buffer has no source file"))
+      (org-link-store-props
+       :type "supernote"
+       :link (format "supernote:%s::%d" (expand-file-name source) page)
+       :description (format "%s p.%d" (file-name-nondirectory source) page)))))
+
+;;;###autoload
+(defun supernote-view-org-follow-link (path _arg)
+  "Open a Supernote Org link PATH of the form FILE::PAGE.
+PAGE is one-based.  Wait for a current manifest before selecting the page."
+  (unless (string-match "\\`\\(.+\\)::\\([1-9][0-9]*\\)\\'" path)
+    (user-error "Invalid Supernote link (expected FILE::PAGE): %s" path))
+  (let ((file (match-string 1 path))
+        (page (string-to-number (match-string 2 path))))
+    (with-current-buffer (supernote-view-file file)
+      (if (and supernote-view--manifest (not (supernote-view--stale-p)))
+          (supernote-view--goto-1 page nil)
+        ;; Opening a new viewer starts an asynchronous manifest request.
+        ;; Replace it with one whose continuation selects the linked page;
+        ;; navigating immediately would clamp against an unknown page count.
+        (setq supernote-view--generation (1+ supernote-view--generation))
+        (supernote-view--load-manifest nil
+         (lambda () (supernote-view--goto-1 page nil)))))))
+
+;;;###autoload
+(with-eval-after-load 'ol
+  (org-link-set-parameters "supernote"
+                           :store #'supernote-view-org-store-link
+                           :follow #'supernote-view-org-follow-link))
 
 
 ;;;; Entry points and registration

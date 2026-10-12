@@ -16,17 +16,12 @@ when a synced file changes. The viewer never saves changes to source notes.
 
 ## Installation
 
-With straight.el and use-package:
+With straight.el:
 
 ```elisp
-(use-package supernote-view
-  :straight (supernote-view :type git :host github :repo "gusaud3051/supernote-view"
-                           :files ("supernote-view.el" "renderer"))
-  :commands (supernote-view-file supernote-view-dwim supernote-view-install-helper)
-  :mode ("\\.note\\'" . supernote-view-mode)
-  :init
-  (add-to-list 'auto-coding-alist '("\\.note\\'" . no-conversion))
-  (add-to-list 'inhibit-local-variables-regexps "\\.note\\'"))
+(straight-use-package
+ '(supernote-view :type git :host github :repo "gusaud3051/supernote-view"
+                  :files ("supernote-view.el" "renderer")))
 ```
 
 Doom `packages.el`:
@@ -37,9 +32,9 @@ Doom `packages.el`:
            :files ("supernote-view.el" "renderer")))
 ```
 
-Use the same declaration in `config.el` with `use-package!` and without
-`:straight`, then run `doom sync`. Keeping the coding registration in `:init`
-is necessary before `find-file` reads a binary note.
+Run `doom sync` after adding the package declaration. The package's autoloads
+register `.note` files, binary coding, local-variable handling, and Org links
+before the viewer is loaded. No Supernote declaration in `config.el` is needed.
 
 For a manual install, clone this repository, add it to `load-path`, and
 `(require 'supernote-view)`. The renderer directory must stay beside the Lisp
@@ -67,6 +62,12 @@ Evil normal state additionally supports `j`/`k` across page boundaries,
 `]]`/`[[`, `gg`/`G`, and `zi`/`zo`. See `C-h m` for the complete map.
 Customize the `supernote-view` group for caching, prefetch, sizing, and theme
 colors. Cached artifacts live outside the source-note directory.
+
+With Org loaded, `org-store-link` in the viewer stores the current page. In
+the outline it stores the page of the entry at point, even when the viewer is
+showing another page. Insert the stored link with `org-insert-link`; opening
+it returns to that page. Links use `supernote:/path/to/note.note::3`, with
+one-based page numbers.
 
 ## Android
 
