@@ -189,6 +189,166 @@ OPTIONS is a plist accepting :manifest, :responses, :defer, :prefetch and
            (kill-buffer buffer))))))
 
 
+;;;; Org links
+
+(ert-deftest supernote-view-test-org-store-current-page ()
+  "Org stores the viewer's page rather than a plain link to the whole file."
+  (require 'org)
+  (should (eq #'supernote-view-org-store-link
+              (org-link-get-parameter "supernote" :store)))
+  (should (eq #'supernote-view-org-follow-link
+              (org-link-get-parameter "supernote" :follow)))
+  (supernote-test--with-viewer nil
+    (supernote-view-goto-page 3)
+    (let ((org-stored-links nil)
+          (org-store-link-plist nil))
+      (org-store-link nil t)
+      (should (equal "supernote:/tmp/supernote-test-note.note::3"
+                     (caar org-stored-links)))
+      (should (string-match-p "supernote-test-note[.]note"
+                              (cadar org-stored-links)))
+      (should (string-match-p "p[.]3" (cadar org-stored-links)))
+      (should (equal "supernote" (plist-get org-store-link-plist :type))))))
+
+(ert-deftest supernote-view-test-org-store-outline-entry ()
+  "An outline link targets the selected entry, even when the viewer is elsewhere."
+  (require 'org)
+  (supernote-test--with-viewer
+      (list :manifest (supernote-test--manifest
+                       (cons 'outlines (supernote-test--outlines))))
+    (let ((note (current-buffer))
+          (org-stored-links nil)
+          (org-store-link-plist nil))
+      (with-current-buffer (supernote-view--outline-noselect)
+        (supernote-outline-last-entry)
+        ;; Point within the row must identify the same entry as its beginning.
+        (end-of-line)
+        (let ((before (point)))
+          (org-store-link nil t)
+          (should (= before (point))))
+        (should (equal "supernote:/tmp/supernote-test-note.note::4"
+                       (caar org-stored-links))))
+      (should (= 0 (with-current-buffer note supernote-view--page))))))
+
+(ert-deftest supernote-view-test-org-store-rejects-missing-targets ()
+  "Missing sources and outline entries signal instead of storing a wrong target."
+  (require 'org)
+  (with-temp-buffer
+    (should-not (supernote-view-org-store-link)))
+  (supernote-test--with-viewer nil
+    (with-current-buffer (supernote-view--outline-noselect)
+      (should-error (org-store-link nil) :type 'user-error))
+    (setq supernote-view--source nil
+          buffer-file-name nil)
+    (should-error (org-store-link nil) :type 'user-error))
+  (supernote-test--with-viewer
+      (list :manifest (supernote-test--manifest
+                       (cons 'outlines (supernote-test--outlines))))
+    (with-current-buffer (supernote-view--outline-noselect)
+      (goto-char (point-max))
+      (should-error (org-store-link nil) :type 'user-error)))
+  (let ((dead-note (generate-new-buffer " *supernote-dead-note*")))
+    (kill-buffer dead-note)
+    (with-temp-buffer
+      (supernote-outline-mode)
+      (setq supernote-outline--note-buffer dead-note)
+      (supernote-outline--fill (supernote-test--outlines))
+      (should-error (org-store-link nil) :type 'user-error))))
+
+(ert-deftest supernote-view-test-org-path-roundtrip ()
+  "Org escaping preserves special file names and the final page suffix."
+  (require 'org)
+  (supernote-test--with-viewer nil
+    (let* ((note (current-buffer))
+           (file "/tmp/한국어 %20 [노트]\\]::7.note")
+           (org-stored-links nil)
+           (org-store-link-plist nil)
+           opened link)
+      (setq supernote-view--source file)
+      (supernote-view-goto-page 3)
+      (setq link (org-store-link nil))
+      (supernote-view-goto-page 5)
+      (cl-letf (((symbol-function 'supernote-view-file)
+                 (lambda (path) (setq opened path) note)))
+        (org-link-open-from-string link))
+      (should (equal file opened))
+      (should (= 2 supernote-view--page))
+      ;; Opening an already loaded note does not request its manifest again.
+      (should (= 1 (cl-count "manifest" supernote-test--log :test #'equal))))))
+
+(ert-deftest supernote-view-test-org-follow-cold-page ()
+  "A page link waits for an asynchronous manifest before applying its page."
+  (require 'org)
+  (supernote-test--with-viewer '(:defer t)
+    (let ((note (current-buffer)))
+      (should-not supernote-view--manifest)
+      (cl-letf (((symbol-function 'supernote-view-file) (lambda (_) note)))
+        (supernote-view-org-follow-link
+         "/tmp/supernote-test-note.note::4" nil))
+      (should-not supernote-view--manifest)
+      (supernote-test--flush)
+      (should (= 3 supernote-view--page))
+      (should (= 1 (cl-count "render" supernote-test--log :test #'equal)))
+      (let ((render (assoc 'page supernote-test--queue)))
+        (should render)
+        (should (equal "3" (cadr (member "--page" (nth 1 render))))))
+      (supernote-test--flush)
+      (should supernote-view--image)
+      (should-not supernote-view--error))))
+
+(ert-deftest supernote-view-test-org-follow-stale-page ()
+  "A stale note reloads before clamping a link against its new page count."
+  (require 'org)
+  (supernote-test--with-viewer nil
+    (let ((note (current-buffer)))
+      (setq supernote-test--queue nil
+            supernote-test--log nil
+            supernote-test--defer t
+            supernote-view--artifacts-stat '(out-of-date)
+            supernote-test--responses
+            (list (cons "manifest"
+                        (list :status 0 :stderr ""
+                              :json (supernote-test--manifest
+                                     '(page_count . 8))))))
+      (should (supernote-view--stale-p))
+      (cl-letf (((symbol-function 'supernote-view-file) (lambda (_) note)))
+        (supernote-view-org-follow-link
+         "/tmp/supernote-test-note.note::8" nil))
+      (should (= 0 supernote-view--page))
+      (should (= 1 (cl-count "manifest" supernote-test--log :test #'equal)))
+      (supernote-test--flush)
+      (should (= 8 (supernote-view--page-count)))
+      (should (= 7 supernote-view--page))
+      (supernote-test--flush)
+      (should supernote-view--image)
+      (should-not supernote-view--error))))
+
+(ert-deftest supernote-view-test-org-follow-latest-request-wins ()
+  "An obsolete manifest callback cannot move to an earlier link's page."
+  (require 'org)
+  (supernote-test--with-viewer '(:defer t)
+    (let ((note (current-buffer)))
+      (cl-letf (((symbol-function 'supernote-view-file) (lambda (_) note)))
+        (supernote-view-org-follow-link
+         "/tmp/supernote-test-note.note::4" nil)
+        (supernote-view-org-follow-link
+         "/tmp/supernote-test-note.note::2" nil))
+      (supernote-test--flush)
+      (should (= 1 supernote-view--page))
+      (should (= 1 (cl-count "render" supernote-test--log :test #'equal)))
+      (supernote-test--flush)
+      (should supernote-view--image)
+      (should (= 1 supernote-view--page)))))
+
+(ert-deftest supernote-view-test-org-follow-invalid-target ()
+  "Malformed page suffixes are rejected before opening a viewer."
+  (cl-letf (((symbol-function 'supernote-view-file)
+             (lambda (_) (ert-fail "An invalid target opened a note"))))
+    (dolist (path '("/tmp/n.note" "/tmp/n.note::0" "/tmp/n.note::-1"
+                    "/tmp/n.note::abc" "/tmp/n.note::1 trailing"))
+      (should-error (supernote-view-org-follow-link path nil) :type 'user-error))))
+
+
 ;;;; Registration
 
 (ert-deftest supernote-view-test-auto-mode-registration ()
